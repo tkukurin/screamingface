@@ -1,21 +1,21 @@
 """OME-972 — live discovery of the OpenRouter public model catalog.
 
 FEATURE: automatic model discovery — ``GET /v1/models`` lists what OpenRouter
-actually serves now (plain ids only), refreshed through a per-process cached
-snapshot instead of compiled seeds frozen at deploy time.
+actually serves now (plain ids and exact ``:free`` variants), refreshed through a
+per-process cached snapshot instead of compiled seeds frozen at deploy time.
 
 INVARIANT (fail-closed, all-or-nothing): a catalog read that is incomplete,
 malformed, empty, over a cap, or paginated off-policy raises a sanitized
 ``DiscoveryError`` and is NEVER partially returned — the cache keeps serving
 the last good snapshot instead. Live data changes what is LISTED, never what
-is dispatchable: dispatch admission (``admission.py``) is untouched.
+is dispatchable: dispatch remains independent of listing membership.
 
-INVARIANT (auto-publish shape): only plain ``vendor/model`` ids pass — the
-same ``_admissible_upstream_id`` predicate the admission route enforces.
-Colon variants and tilde aliases stay reachable via explicit operator config
-(``AIGW_OPENROUTER_DEFAULT_MODELS``) or direct dispatch, never via listing --
-except ``:online``, which ``settings.py`` now refuses to configure at all
-because dispatch refuses it (OME-972 correction pass).
+INVARIANT (auto-publish shape): plain ``vendor/model`` ids and exact terminal
+``:free`` variants pass — the same ``_admissible_upstream_id`` predicate the
+admission route enforces. Other colon variants and tilde aliases stay reachable
+via explicit operator config (``AIGW_OPENROUTER_DEFAULT_MODELS``) or direct
+dispatch, never via automatic listing — except ``:online``, which ``settings.py``
+refuses to configure because dispatch refuses it (OME-972 correction pass).
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ LIVE_MODELS_URL = f"{MODELS_URL}?output_modalities=text&limit={_PAGE_LIMIT}"
 # stored snapshot at once.
 LIVE_MODELS_DISCOVERY_SOURCE = ModelDiscoverySource(
     key="openrouter:models:list",
-    revision="openrouter:models:list-v1",
+    revision="openrouter:models:list-v2",
     ttl_s=300.0,
     stale_ttl_s=3600.0,
     failure_ttl_s=30.0,

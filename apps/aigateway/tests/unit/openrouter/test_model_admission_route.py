@@ -115,21 +115,26 @@ def _admit(client: TestClient, model_id: str) -> dict:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", ":free"])
 async def test_a_real_catalog_model_is_admitted_and_listed(
-    openrouter_enabled, authenticated_client, credential_blobs
+    openrouter_enabled, authenticated_client, credential_blobs, suffix: str
 ) -> None:
-    http = _RoutingClient({MODELS_URL: _CATALOG, OPENAPI_URL: _OPENAPI})
+    model_id = f"{_TARGET}{suffix}"
+    catalog = {"data": [{"id": f"{_TARGET_UPSTREAM}{suffix}"}]}
+    http = _RoutingClient({MODELS_URL: catalog, OPENAPI_URL: _OPENAPI})
     _install_runtime(authenticated_client, http)
     await _credential(credential_blobs, authenticated_client)
 
-    body = _admit(authenticated_client, _TARGET)
+    body = _admit(authenticated_client, model_id)
     assert body["admitted"] is True
-    assert body["model_id"] == _TARGET
+    assert body["model_id"] == model_id
     assert body["code"] is None
 
     listed = {row["id"] for row in authenticated_client.get("/v1/models").json()["data"]}
-    assert _TARGET in listed
+    assert model_id in listed
     assert _SEED in listed
+    if suffix:
+        assert _TARGET not in listed
 
 
 @pytest.mark.asyncio
@@ -185,8 +190,9 @@ async def test_an_already_seeded_model_is_admitted_without_a_catalog_dial(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model_id", [_TARGET, f"{_TARGET}:free"])
 async def test_the_flag_off_refuses_before_anything_else(
-    monkeypatch: pytest.MonkeyPatch, authenticated_client, credential_blobs
+    monkeypatch: pytest.MonkeyPatch, authenticated_client, credential_blobs, model_id: str
 ) -> None:
     from aigateway.plugins.openrouter_provider import plugin as plugin_module
 
@@ -199,15 +205,16 @@ async def test_the_flag_off_refuses_before_anything_else(
     _install_runtime(authenticated_client, http)
     await _credential(credential_blobs, authenticated_client)
 
-    body = _admit(authenticated_client, _TARGET)
+    body = _admit(authenticated_client, model_id)
     assert body["admitted"] is False
     assert body["code"] == "dynamic_admission_disabled"
     assert http.calls == []
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model_id", [_TARGET, f"{_TARGET}:free"])
 async def test_a_disabled_provider_refuses_with_its_own_code(
-    monkeypatch: pytest.MonkeyPatch, authenticated_client, credential_blobs
+    monkeypatch: pytest.MonkeyPatch, authenticated_client, credential_blobs, model_id: str
 ) -> None:
     from aigateway.plugins.openrouter_provider import plugin as plugin_module
 
@@ -220,49 +227,61 @@ async def test_a_disabled_provider_refuses_with_its_own_code(
     _install_runtime(authenticated_client, http)
     await _credential(credential_blobs, authenticated_client)
 
-    body = _admit(authenticated_client, _TARGET)
+    body = _admit(authenticated_client, model_id)
     assert body["admitted"] is False
     assert body["code"] == "provider_disabled"
     assert http.calls == []
 
 
+@pytest.mark.parametrize("model_id", [_TARGET, f"{_TARGET}:free"])
 def test_a_missing_credential_refuses_before_the_catalog_dial(
-    openrouter_enabled, authenticated_client
+    openrouter_enabled, authenticated_client, model_id: str
 ) -> None:
     # No profile upserted: the account has no OpenRouter credential.
     http = _RoutingClient({MODELS_URL: _CATALOG})
     _install_runtime(authenticated_client, http)
 
-    body = _admit(authenticated_client, _TARGET)
+    body = _admit(authenticated_client, model_id)
     assert body["admitted"] is False
     assert body["code"] == "provider_not_credentialed"
     assert http.calls == []
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model_id", "catalog_upstream"),
+    [
+        (_TARGET, _SEED_UPSTREAM),
+        (f"{_TARGET}:free", _TARGET_UPSTREAM),
+        (_TARGET, f"{_TARGET_UPSTREAM}:free"),
+    ],
+    ids=["absent", "free-absent-paid-present", "paid-absent-free-present"],
+)
 async def test_a_model_absent_from_the_catalog_is_refused(
-    openrouter_enabled, authenticated_client, credential_blobs
+    openrouter_enabled, authenticated_client, credential_blobs, model_id: str, catalog_upstream: str
 ) -> None:
-    http = _RoutingClient({MODELS_URL: {"data": [{"id": _SEED_UPSTREAM}]}})
+    http = _RoutingClient({MODELS_URL: {"data": [{"id": catalog_upstream}]}})
     _install_runtime(authenticated_client, http)
     await _credential(credential_blobs, authenticated_client)
 
-    body = _admit(authenticated_client, _TARGET)
+    body = _admit(authenticated_client, model_id)
     assert body["admitted"] is False
     assert body["code"] == "model_not_on_openrouter"
     listed = {row["id"] for row in authenticated_client.get("/v1/models").json()["data"]}
-    assert _TARGET not in listed
+    assert model_id not in listed
+    assert http.calls == [MODELS_URL]
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model_id", [_TARGET, f"{_TARGET}:free"])
 async def test_a_catalog_outage_is_its_own_refusal_not_a_typo_verdict(
-    openrouter_enabled, authenticated_client, credential_blobs
+    openrouter_enabled, authenticated_client, credential_blobs, model_id: str
 ) -> None:
     http = _RoutingClient({MODELS_URL: _CATALOG}, fail=MODELS_URL)
     _install_runtime(authenticated_client, http)
     await _credential(credential_blobs, authenticated_client)
 
-    body = _admit(authenticated_client, _TARGET)
+    body = _admit(authenticated_client, model_id)
     assert body["admitted"] is False
     assert body["code"] == "openrouter_catalog_unavailable"
 
@@ -272,7 +291,19 @@ async def test_a_catalog_outage_is_its_own_refusal_not_a_typo_verdict(
     "model_id",
     [
         "openrouter/qwen",  # one upstream segment
-        "openrouter/qwen/qwen2.5-7b-instruct:free",  # ':variant' — cache/search bypass risk
+        "openrouter/qwen/qwen2.5-7b-instruct:online",  # implicit search remains refused
+        "openrouter/qwen/qwen2.5-7b-instruct:fast",
+        "openrouter/qwen/qwen2.5-7b-instruct:batch",
+        "openrouter/qwen/qwen2.5-7b-instruct:FREE",
+        "openrouter/qwen/qwen2.5-7b-instruct:free-extra",
+        "openrouter/qwen/qwen2.5-7b-instruct:free:free",
+        "openrouter/qwen/qwen2.5-7b-instruct:online:free",
+        "openrouter/qwen/qwen2.5-7b-instruct:free:online",
+        "openrouter/qwen/qwen2.5-7b-instruct:free/extra",
+        "openrouter/qwen/qwen2.5-7b-instruct:",
+        "openrouter/qwen/:free",
+        "openrouter/qwen/qwen2.5-7b-instruct%3Afree",
+        "openrouter/~alias/model:free",
         "openrouter/x-ai/grok-4~fast",  # '~' — engine colon escape, never admissible
         "openrouter/~alias/model",  # '~' author alias marker
     ],
@@ -287,6 +318,7 @@ async def test_variant_and_malformed_ids_are_refused_by_shape(
     body = _admit(authenticated_client, model_id)
     assert body["admitted"] is False
     assert body["code"] == "invalid_model_id"
+    assert "optional terminal ':free'" in body["message"]
     assert http.calls == []
 
 

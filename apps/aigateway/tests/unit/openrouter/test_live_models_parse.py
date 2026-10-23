@@ -31,7 +31,7 @@ def test_discovery_source_pins_identity_and_cache_policy() -> None:
     # what the process-local cache scopes TTLs to — changing it invalidates
     # every stored snapshot, so the exact values are pinned here.
     assert LIVE_MODELS_DISCOVERY_SOURCE.key == "openrouter:models:list"
-    assert LIVE_MODELS_DISCOVERY_SOURCE.revision == "openrouter:models:list-v1"
+    assert LIVE_MODELS_DISCOVERY_SOURCE.revision == "openrouter:models:list-v2"
     assert LIVE_MODELS_DISCOVERY_SOURCE.ttl_s == 300.0
     assert LIVE_MODELS_DISCOVERY_SOURCE.stale_ttl_s == 3600.0
     assert LIVE_MODELS_DISCOVERY_SOURCE.failure_ttl_s == 30.0
@@ -191,28 +191,53 @@ def test_validate_next_url_refuses_any_off_policy_next(next_url: str, expected_o
 # ---------------------------------------------------------------- publishable_upstream_ids
 
 
-def test_publishable_keeps_plain_ids_and_drops_variants_and_junk() -> None:
-    # INVARIANT: auto-publish admits ONLY plain upstream ids — the same shape
-    # predicate the admission route enforces. Colon variants and tilde aliases
-    # stay reachable via explicit operator config or direct dispatch, never
-    # via automatic listing.
+def test_publishable_keeps_plain_and_free_ids_and_drops_other_variants_and_junk() -> None:
+    # Auto-publish uses the admission predicate: only plain ids and exact :free.
     ids = publishable_upstream_ids(
         [
             "qwen/qwen3-coder",
             "openai/gpt-5",
             "openai/gpt-5",  # duplicate collapses
-            "deepseek/deepseek-chat:free",  # colon variant — dropped
+            "deepseek/deepseek-chat:free",
+            "deepseek/deepseek-chat:online",
+            "deepseek/deepseek-chat:fast",
+            "deepseek/deepseek-chat:batch",
+            "deepseek/deepseek-chat:FREE",
+            "deepseek/deepseek-chat:free:free",
+            "deepseek/deepseek-chat:online:free",
+            "deepseek/deepseek-chat:free:online",
+            "deepseek/deepseek-chat:free/extra",
+            "deepseek/deepseek-chat:free-extra",
+            "~deepseek/deepseek-chat:free",
             "meta/llama~4",  # tilde alias — dropped
             "not-a-slug",  # no vendor/model shape — dropped
             "vendor/" + "a" * 300,  # over-length — dropped
         ]
     )
-    assert ids == ("openai/gpt-5", "qwen/qwen3-coder")
+    assert ids == ("deepseek/deepseek-chat:free", "openai/gpt-5", "qwen/qwen3-coder")
+
+
+@pytest.mark.parametrize(
+    ("raw_ids", "expected"),
+    [
+        (["vendor/model:free"], ("vendor/model:free",)),
+        (["vendor/model"], ("vendor/model",)),
+        (
+            ["vendor/model:free", "vendor/model", "vendor/model:free"],
+            ("vendor/model", "vendor/model:free"),
+        ),
+    ],
+    ids=["free-only", "paid-only", "both-deduplicated"],
+)
+def test_publishable_preserves_exact_catalog_ids(
+    raw_ids: list[str], expected: tuple[str, ...]
+) -> None:
+    assert publishable_upstream_ids(raw_ids) == expected
 
 
 @pytest.mark.parametrize(
     "raw_ids",
-    [[], ["deepseek/deepseek-chat:free", "meta/llama~4", "not-a-slug"]],
+    [[], ["deepseek/deepseek-chat:online", "meta/llama~4", "not-a-slug"]],
     ids=["no-rows", "all-filtered"],
 )
 def test_publishable_empty_result_fails_closed(raw_ids: list[str]) -> None:

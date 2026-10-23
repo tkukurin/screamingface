@@ -118,23 +118,33 @@ def test_enabled_plugin_declares_the_pinned_source() -> None:
 
 @pytest.mark.asyncio
 async def test_discover_live_models_returns_the_finished_merged_listing() -> None:
-    # INVARIANT: the provider owns the merge — operator-explicit entries first
-    # (colon variant included), then discovered publishable ids sorted; colon
-    # variants from the CATALOG are never auto-published.
+    # INVARIANT: operator-explicit entries come first, then sorted discovered
+    # plain ids and exact :free variants. Other variants are never auto-published.
     plugin = OpenRouterProviderPlugin(
         OpenRouterPluginSettings(
             enabled=True,
             default_models=["openrouter/deepseek/deepseek-chat-v3.1:free"],
         )
     )
-    client = _CountingClient(["qwen/qwen3-coder", "openai/gpt-5", "openai/gpt-5:free"])
+    client = _CountingClient(
+        [
+            "qwen/qwen3-coder",
+            "openai/gpt-5",
+            "openai/gpt-5:free",
+            "openai/gpt-5:online",
+            "openai/gpt-5:fast",
+            "openai/gpt-5:batch",
+        ]
+    )
     entries = await plugin.discover_live_models(client=client)
     assert entries is not None
     assert [e.model_name for e in entries] == [
         "openrouter/deepseek/deepseek-chat-v3.1:free",
         "openrouter/openai/gpt-5",
+        "openrouter/openai/gpt-5:free",
         "openrouter/qwen/qwen3-coder",
     ]
+    assert all(e.litellm_params == {"model": e.model_name} for e in entries)
     assert client.dialed == [LIVE_MODELS_URL]
 
 

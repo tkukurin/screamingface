@@ -11,10 +11,10 @@ The ladder runs cheapest-first, in EXECUTION order:
    refuses everything, before any other work.
 2. Provider — a disabled provider (`AIGW_OPENROUTER_ENABLED=false`) can serve
    nothing, so admitting into it would be a lie.
-3. Shape — the id must be `openrouter/<author>/<model>` exactly: no `:variant`
-   (a second route around gateway-owned search/caching, see `is_online_variant`)
-   and no `~` (the engine's colon escape, OME-873 — a `~` id is an encoding,
-   not a model).
+3. Shape — the id must be `openrouter/<author>/<model>` with an optional exact
+   terminal `:free`. Other variants (including `:online`, a second route around
+   gateway-owned search/caching) and `~` (the engine's colon escape, OME-873)
+   are refused.
 4. Credential — the calling account must hold a usable OpenRouter credential;
    without one the admitted model could never dispatch, so refuse now with the
    knob's name instead of mid-run later.
@@ -63,9 +63,13 @@ _CACHE_EXPIRES_KEY = "expires_at"
 
 
 def _admissible_upstream_id(upstream: str) -> bool:
-    # Stricter than the D8 grammar on purpose: admission mints catalog entries,
-    # so `:variant` and `~` shapes the grammar tolerates elsewhere are refused.
-    return is_valid_upstream_model_id(upstream) and ":" not in upstream and "~" not in upstream
+    # Stricter than D8: only the exact :free variant may mint catalog entries;
+    # its full id must still appear in the upstream catalog, never just its base.
+    return (
+        is_valid_upstream_model_id(upstream)
+        and "~" not in upstream
+        and (":" not in upstream or upstream.endswith(":free"))
+    )
 
 
 async def _catalog_ids(
@@ -132,7 +136,7 @@ async def admit_openrouter_model(
         return ModelAdmission.refused(
             "invalid_model_id",
             f"{model_id!r} is not admissible: expected 'openrouter/<author>/<model>' "
-            "with no ':variant' and no '~'",
+            "with only an optional terminal ':free' and no '~'",
         )
     # Stage 4 — credential.
     if not credentialed:
