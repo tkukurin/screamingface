@@ -156,22 +156,24 @@ def _client(handler, transport) -> sf.Client:
     )
 
 
-def test_a_missing_openrouter_model_defers_to_the_probe_and_proceeds() -> None:
+@pytest.mark.parametrize("target", [_TARGET, f"{_TARGET}~free"])
+def test_a_missing_openrouter_model_defers_to_the_probe_and_proceeds(target: str) -> None:
     probed: list[str] = []
     transport = _Transport()
     client = _client(_engine({}, probed), transport)
 
     with client, pytest.raises(_ReachedExecution):
-        client.evaluate(sf.Model(_TARGET), benchmark="draco")
+        client.evaluate(sf.Model(target), benchmark="draco")
 
     # WHY the probe matters: it is the request that makes the Engine ask the
     # gateway to admit the model — without it nothing ever triggers admission.
-    assert _TARGET in probed
+    assert target in probed
     assert transport.called is True
 
 
 @pytest.mark.asyncio
-async def test_the_async_path_defers_the_same_way() -> None:
+@pytest.mark.parametrize("target", [_TARGET, f"{_TARGET}~free"])
+async def test_the_async_path_defers_the_same_way(target: str) -> None:
     probed: list[str] = []
     transport = _AsyncTransport()
     client = sf.AsyncClient(
@@ -181,10 +183,10 @@ async def test_the_async_path_defers_the_same_way() -> None:
     )
 
     with pytest.raises(_ReachedExecution):
-        await client.evaluate(sf.Model(_TARGET), benchmark="draco")
+        await client.evaluate(sf.Model(target), benchmark="draco")
     await client.aclose()
 
-    assert _TARGET in probed
+    assert target in probed
     assert transport.called is True
 
 

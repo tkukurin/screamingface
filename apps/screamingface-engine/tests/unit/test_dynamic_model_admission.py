@@ -52,7 +52,7 @@ _CREDENTIAL = Credential.derive({"X-User-Email": "alice@example.com"})
 
 @pytest.mark.parametrize(
     "model_id",
-    [_TARGET, "openrouter/mistralai/ministral-3b-2512"],
+    [_TARGET, f"{_TARGET}:free", "openrouter/mistralai/ministral-3b-2512"],
 )
 def test_openrouter_shaped_ids_are_admissible(model_id: str) -> None:
     assert is_dynamically_admissible(model_id)
@@ -65,7 +65,13 @@ def test_openrouter_shaped_ids_are_admissible(model_id: str) -> None:
         "openrouter/qwen",  # one upstream segment
         "openrouter/a/b/c",  # three upstream segments
         "openrouter/x-ai/grok-4~fast",  # '~' colon escape (OME-873) is an encoding, not a model
-        "openrouter/qwen/qwen2.5:free",  # ':' variant can never be a url4 route
+        "openrouter/qwen/qwen2.5:online",
+        "openrouter/qwen/qwen2.5:fast",
+        "openrouter/qwen/qwen2.5:batch",
+        "openrouter/qwen/qwen2.5:FREE",
+        "openrouter/qwen/qwen2.5:free:free",
+        "openrouter/qwen/qwen2.5~free",
+        "openrouter/qwen/qwen2.5:",
         "openrouter//model",  # empty segment
     ],
 )
@@ -442,6 +448,48 @@ def test_the_catalog_exposes_its_admitted_ids_for_run_env_injection() -> None:
     assert catalog.admitted_model_ids == ()
     admitted.add(_TARGET)
     assert catalog.admitted_model_ids == (_TARGET,)
+
+
+@pytest.mark.asyncio
+async def test_free_variant_lookup_keeps_gateway_ids_and_heals() -> None:
+    real_model = f"{_TARGET}:free"
+    route = f"{_TARGET}~free"
+    metadata = ModelParameterResponse(
+        status=200,
+        content=json.dumps({"model": {"id": real_model}, "other": real_model}).encode(),
+    )
+    params = _SequencedParamSource([metadata, metadata, _NOT_FOUND, metadata])
+    admitted = AdmittedModels()
+    admitter = _Admitter(AdmissionAnswer(outcome="admitted"))
+    source = ExecutableModelParameterSource(
+        params, frozenset({_DECLARED}), admitted=admitted, admission_source=admitter
+    )
+
+    for _ in range(3):
+        response = await source.fetch_model_parameters(_CREDENTIAL, route)
+        assert json.loads(response.content) == {"model": {"id": route}, "other": real_model}
+
+    assert params.fetched == [real_model] * 4
+    assert admitter.calls == [real_model, real_model]
+    assert admitted.ids == (real_model,)
+
+
+@pytest.mark.asyncio
+async def test_free_variant_overlay_is_encoded_for_listing_and_run_world() -> None:
+    real_model = f"{_TARGET}:free"
+    route = f"{_TARGET}~free"
+    admitted = AdmittedModels()
+    admitted.add(real_model)
+    catalog = ExecutableCatalog(
+        _UpstreamCatalog([_DECLARED, real_model]), frozenset({_DECLARED}), admitted=admitted
+    )
+
+    assert _listed_ids(await catalog.fetch(_CREDENTIAL)) == [_DECLARED, route]
+    assert catalog.admitted_model_ids == (route,)
+    section = _world(job_env.extra_models_to_env(catalog.admitted_model_ids)).aigateway
+    assert section is not None
+    assert f"/{route}" in routes_for(section.models)
+    assert f"/{real_model}" not in routes_for(section.models)
 
 
 # --- cache invalidation ------------------------------------------------------

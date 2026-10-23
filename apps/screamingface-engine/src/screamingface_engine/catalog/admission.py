@@ -29,18 +29,17 @@ _OPENROUTER_PREFIX = "openrouter/"
 def is_dynamically_admissible(model_id: str) -> bool:
     """True when ``model_id`` is a shape the gateway could dynamically admit.
 
-    Exactly ``openrouter/<author>/<model>``: three segments, none empty, no
-    ``~`` (the OME-873 colon escape — an encoding, never a model) and no ``:``
-    (which no url4 route may carry). Everything else refuses locally without an
-    admission round trip — the gate exists so a typo'd anthropic id never costs
-    a gateway call.
+    Accept real ``openrouter/<author>/<model>`` ids with an optional exact
+    ``:free`` suffix. Other variants and ``~`` route encodings refuse locally
+    without an admission round trip.
     """
     if not model_id.startswith(_OPENROUTER_PREFIX):
         return False
-    if "~" in model_id or ":" in model_id:
+    base = model_id.removesuffix(":free")
+    if "~" in base or ":" in base:
         return False
-    segments = model_id.split("/")
-    return len(segments) == 3 and all(segments) and is_route_legal(model_id)
+    segments = base.split("/")
+    return len(segments) == 3 and all(segments) and is_route_legal(base)
 
 
 class AdmittedModels:

@@ -77,6 +77,10 @@ def test_nothing_but_an_admissible_local_route_is_named(url4: str) -> None:
     assert _named_dynamic_models(url4) == ()
 
 
+def test_a_free_variant_is_decoded_for_admission() -> None:
+    assert _named_dynamic_models(f"/{_TARGET}~free('hi')!'go'") == (f"{_TARGET}:free",)
+
+
 def test_a_model_named_only_inside_an_iteration_body_or_intent_is_found() -> None:
     # WHY these are walked by re-parsing: `Iteration.body`/`intent` are template TEXT the
     # executor parses per row, so `nodes.walk` never yields them.
@@ -196,6 +200,31 @@ async def test_a_granted_model_joins_the_overlay_before_the_call_returns() -> No
     assert admitter.credentials == [_CREDENTIAL]
     # OME-1134: each upstream call is this request's own, so each carries its traceparent.
     assert params.fetched == [_TARGET]
+    assert params.traceparents == [_TRACEPARENT]
+
+
+@pytest.mark.asyncio
+async def test_a_free_variant_is_admitted_using_its_route_form(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_model = f"{_TARGET}:free"
+    source, params, admitter, admitted, _ = _source(AdmissionAnswer(outcome="admitted"))
+    route_lookups: list[str] = []
+    fetch = source.fetch_model_parameters
+
+    async def lookup(
+        credential: Credential, model: str, *, traceparent: str | None = None
+    ) -> ModelParameterResponse:
+        route_lookups.append(model)
+        return await fetch(credential, model, traceparent=traceparent)
+
+    monkeypatch.setattr(source, "fetch_model_parameters", lookup)
+    await source.admit_run_models(_CREDENTIAL, [real_model], traceparent=_TRACEPARENT)
+
+    assert route_lookups == [f"{_TARGET}~free"]
+    assert admitted.ids == (real_model,)
+    assert admitter.calls == [real_model]
+    assert params.fetched == [real_model]
     assert params.traceparents == [_TRACEPARENT]
 
 

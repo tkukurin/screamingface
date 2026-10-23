@@ -100,7 +100,8 @@ class ExecutableCatalog:
     def admitted_model_ids(self) -> tuple[str, ...]:
         """Every dynamic URL4 route the App injects into a run's env."""
         local_ids = () if self._local is None else self._local.route_ids
-        return tuple(sorted(set(self._admitted.ids) | set(local_ids)))
+        admitted_ids = {encode_route_id(model) for model in self._admitted.ids}
+        return tuple(sorted(admitted_ids | set(local_ids)))
 
     async def fetch(self, credential: Credential) -> ModelCatalog:
         catalog = await self._source.fetch(credential)
@@ -305,7 +306,7 @@ class ExecutableModelParameterSource:
                 continue
             try:
                 response = await self.fetch_model_parameters(
-                    credential, model, traceparent=traceparent
+                    credential, encode_route_id(model), traceparent=traceparent
                 )
             except CatalogError as exc:
                 # The class name only: the message may echo upstream text, and the credential's
